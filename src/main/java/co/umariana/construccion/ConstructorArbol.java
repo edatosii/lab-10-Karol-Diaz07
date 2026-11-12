@@ -2,7 +2,14 @@ package co.umariana.construccion;
 
 import co.umariana.modelo.ArbolGenealogico;
 import co.umariana.modelo.ArbolInvalidoException;
+import co.umariana.modelo.Persona;
+import co.umariana.modelo.Posicion;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 /**
  * Construye un árbol genealógico a partir de un texto: cada línea es una persona.
  *
@@ -44,14 +51,114 @@ public final class ConstructorArbol {
 
     private ConstructorArbol() {
     }
-
-    /**
-     * Convierte el texto en un árbol (ver las reglas arriba).
-     *
-     * @throws ArbolInvalidoException si el texto no cumple las reglas
-     */
+    private static final class Entrada {
+        final int linea;
+        final Persona persona;
+ 
+        Entrada(int linea, Persona persona) {
+            this.linea = linea;
+            this.persona = persona;
+        }
+    }
+    
     public static ArbolGenealogico construir(String texto) {
         // TODO Etapa 3
-        throw new UnsupportedOperationException("TODO: construir");
+        // Regla 1
+        if (texto == null || texto.isBlank()) {
+            throw new ArbolInvalidoException("El texto está vacío: no hay ninguna persona.");
+        }
+ 
+        // Regla 2: \n o \r\n; el -1 conserva las líneas vacías para contar bien
+        String[] lineas = texto.split("\r?\n", -1);
+ 
+        List<Entrada> entradas = new ArrayList<>();
+        Set<String> vistas = new HashSet<>();
+ 
+        for (int i = 0; i < lineas.length; i++) {
+            String linea = lineas[i];
+            if (linea.isBlank()) {
+                continue;
+            }
+            int n = i + 1;
+ 
+            // Regla 3
+            String[] c = linea.split(";", -1);
+            if (c.length < 3 || c.length > 4) {
+                throw new ArbolInvalidoException("Línea " + n + ": debe tener 3 o 4 campos separados por ';'.");
+            }
+            String pos = c[0].strip();
+            String nombre = c[1].strip();
+ 
+            // Regla 4
+            int nacimiento;
+            try {
+                nacimiento = Integer.parseInt(c[2].strip());
+            } catch (NumberFormatException e) {
+                throw new ArbolInvalidoException("Línea " + n + ": el nacimiento no es un número entero.");
+            }
+            Integer fallecimiento = null;
+            if (c.length == 4 && !c[3].isBlank()) {
+                try {
+                    fallecimiento = Integer.parseInt(c[3].strip());
+                } catch (NumberFormatException e) {
+                    throw new ArbolInvalidoException("Línea " + n + ": el fallecimiento no es un número entero.");
+                }
+            }
+ 
+            // Regla 5
+            Persona persona = new Persona(pos, nombre, nacimiento, fallecimiento);
+            try {
+                persona.validar();
+            } catch (IllegalArgumentException e) {
+                throw new ArbolInvalidoException("Línea " + n + ": " + e.getMessage());
+            }
+            if (!vistas.add(pos)) {
+                throw new ArbolInvalidoException("Línea " + n + ": la posición " + pos + " está repetida.");
+            }
+            entradas.add(new Entrada(n, persona));
+        }
+ 
+        // Regla 6
+        if (!vistas.contains(Posicion.SUJETO)) {
+            throw new ArbolInvalidoException("Falta el sujeto (posición 1).");
+        }
+ 
+        // Regla 7: sujeto, ascendientes por número, descendientes por generación
+        entradas.sort(Comparator
+                .comparingInt((Entrada e) -> grupo(e.persona.getPosicion()))
+                .thenComparingInt(e -> clave(e.persona.getPosicion()))
+                .thenComparingInt(e -> e.linea));
+ 
+        Entrada primera = entradas.get(0); // siempre es el sujeto
+        ArbolGenealogico arbol = new ArbolGenealogico(primera.persona);
+ 
+        for (int i = 1; i < entradas.size(); i++) {
+            Entrada e = entradas.get(i);
+            try {
+                arbol.agregar(e.persona);
+            } catch (IllegalArgumentException ex) {
+                throw new ArbolInvalidoException("Línea " + e.linea + ": " + ex.getMessage());
+            }
+        }
+        return arbol;
+    }
+ 
+    /** 0 = sujeto, 1 = ascendientes, 2 = descendientes. */
+    private static int grupo(String posicion) {
+        if (Posicion.esSujeto(posicion)) {
+            return 0;
+        }
+        return Posicion.esAscendiente(posicion) ? 1 : 2;
+    }
+ 
+    /** Ascendientes: el número Ahnentafel. Descendientes: la generación. */
+    private static int clave(String posicion) {
+        if (Posicion.esSujeto(posicion)) {
+            return 0;
+        }
+        if (Posicion.esAscendiente(posicion)) {
+            return Integer.parseInt(posicion);
+        }
+        return Posicion.generacion(posicion);
     }
 }
